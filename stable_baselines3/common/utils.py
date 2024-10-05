@@ -271,6 +271,24 @@ def is_vectorized_box_observation(observation: np.ndarray, observation_space: sp
             + "or (n_env, {}) for the observation shape.".format(", ".join(map(str, observation_space.shape)))
         )
 
+def is_vectorized_tensor_observation(observation: th.Tensor, observation_space: th.Tensor) -> bool:
+    """
+    For tensor observation type, detects and validates the shape,
+    then returns whether or not the observation is vectorized.
+
+    :param observation: the input observation to validate
+    :param observation_space: the observation space
+    :return: whether the given observation is vectorized or not
+    """
+    if observation.shape[1] == observation_space.shape[1] and (len(observation.shape) == 2 or len(observation.shape) == 3):
+        return True
+    else:
+        raise ValueError(
+            f"Error: Unexpected observation shape {observation.shape} for "
+            + f"Tensor environment, please use {observation_space.shape} "
+            + "or (n_env, {}) for the observation shape.".format(", ".join(map(str, observation_space.shape)))
+        )
+
 
 def is_vectorized_discrete_observation(observation: Union[int, np.ndarray], observation_space: spaces.Discrete) -> bool:
     """
@@ -378,7 +396,9 @@ def is_vectorized_dict_observation(observation: np.ndarray, observation_space: s
         )
 
 
-def is_vectorized_observation(observation: Union[int, np.ndarray], observation_space: spaces.Space) -> bool:
+from typing import Type
+
+def is_vectorized_observation(observation: Union[int, np.ndarray], observation_space: Union[spaces.Space, Type[th.Tensor]]) -> bool:
     """
     For every observation type, detects and validates the shape,
     then returns whether or not the observation is vectorized.
@@ -394,6 +414,7 @@ def is_vectorized_observation(observation: Union[int, np.ndarray], observation_s
         spaces.MultiDiscrete: is_vectorized_multidiscrete_observation,
         spaces.MultiBinary: is_vectorized_multibinary_observation,
         spaces.Dict: is_vectorized_dict_observation,
+        th.tensor: is_vectorized_tensor_observation,
     }
 
     for space_type, is_vec_obs_func in is_vec_obs_func_dict.items():
@@ -473,7 +494,7 @@ def polyak_update(
             th.add(target_param.data, param.data, alpha=tau, out=target_param.data)
 
 
-def obs_as_tensor(obs: Union[np.ndarray, Dict[str, np.ndarray]], device: th.device) -> Union[th.Tensor, TensorDict]:
+def obs_as_tensor(obs: Union[np.ndarray, Dict[str, np.ndarray], th.Tensor], device: th.device) -> Union[th.Tensor, TensorDict]:
     """
     Moves the observation to the given device.
 
@@ -481,6 +502,8 @@ def obs_as_tensor(obs: Union[np.ndarray, Dict[str, np.ndarray]], device: th.devi
     :param device: PyTorch device
     :return: PyTorch tensor of the observation on a desired device.
     """
+    if isinstance(obs, th.Tensor):
+        return obs.to(device)
     if isinstance(obs, np.ndarray):
         return th.as_tensor(obs, device=device)
     elif isinstance(obs, dict):

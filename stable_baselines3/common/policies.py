@@ -35,6 +35,7 @@ from stable_baselines3.common.type_aliases import PyTorchObs, Schedule
 from stable_baselines3.common.utils import get_device, is_vectorized_observation, obs_as_tensor
 
 SelfBaseModel = TypeVar("SelfBaseModel", bound="BaseModel")
+SelfBaseTransformerModel = TypeVar("SelfBaseTransformerModel", bound="BaseModelTransformer")
 
 
 class BaseModel(nn.Module):
@@ -65,7 +66,7 @@ class BaseModel(nn.Module):
         self,
         observation_space: spaces.Space,
         action_space: spaces.Space,
-        features_extractor_class: Type[BaseFeaturesExtractor] = FlattenExtractor,
+        features_extractor_class: Union[Type[BaseFeaturesExtractor], Type[Transformer], None] = None,
         features_extractor_kwargs: Optional[Dict[str, Any]] = None,
         features_extractor: Optional[BaseFeaturesExtractor] = None,
         normalize_images: bool = True,
@@ -87,12 +88,16 @@ class BaseModel(nn.Module):
 
         self.optimizer_class = optimizer_class
         self.optimizer_kwargs = optimizer_kwargs
-
-        self.features_extractor_class = features_extractor_class
-        self.features_extractor_kwargs = features_extractor_kwargs
+        if features_extractor_class is None:
+            self.features_extractor_class = FlattenExtractor
+            self.features_extractor_kwargs = features_extractor_kwargs
+        else:
+            self.features_extractor_class = features_extractor_class
+            self.features_extractor_kwargs = features_extractor_kwargs
         # Automatically deactivate dtype and bounds checks
-        if not normalize_images and issubclass(features_extractor_class, (NatureCNN, CombinedExtractor)):
-            self.features_extractor_kwargs.update(dict(normalized_image=True))
+        if self.features_extractor_class in [NatureCNN, CombinedExtractor]:
+            if not normalize_images and issubclass(features_extractor_class, (NatureCNN, CombinedExtractor)):
+                self.features_extractor_kwargs.update(dict(normalized_image=True))
 
     def _update_features_extractor(
         self,
@@ -277,6 +282,195 @@ class BaseModel(nn.Module):
         obs_tensor = obs_as_tensor(observation, self.device)
         return obs_tensor, vectorized_env
 
+
+class BaseModelTransformer(nn.Module):
+    """
+    The base model object: makes predictions in response to observations.
+
+    In the case of policies, the prediction is an action. In the case of critics, it is the
+    estimated value of the observation.
+
+    :param observation_space: The observation space of the environment
+    :param action_space: The action space of the environment
+    :param features_extractor_class: Features extractor to use.
+    :param features_extractor_kwargs: Keyword arguments
+        to pass to the features extractor.
+    :param features_extractor: Network to extract features
+        (a CNN when using images, a nn.Flatten() layer otherwise)
+    :param normalize_images: Whether to normalize images or not,
+         dividing by 255.0 (True by default)
+    :param optimizer_class: The optimizer to use,
+        ``th.optim.Adam`` by default
+    :param optimizer_kwargs: Additional keyword arguments,
+        excluding the learning rate, to pass to the optimizer
+    """
+
+    optimizer: th.optim.Optimizer
+
+    def __init__(
+        self,
+        observation_space: th.Tensor,
+        action_space: spaces.Space,
+        features_extractor_class: Type[th.nn.Module] = Transformer,
+        features_extractor_kwargs: Optional[Dict[str, Any]] = None,
+        features_extractor: Optional[th.nn.Module] = None,
+        optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
+        optimizer_kwargs: Optional[Dict[str, Any]] = None,
+    ):
+        super().__init__()
+
+        if optimizer_kwargs is None:
+            optimizer_kwargs = {}
+
+        if features_extractor_kwargs is None:
+            features_extractor_kwargs = {}
+
+        self.observation_space = observation_space # what should this be need to fix
+        self.action_space = action_space
+        self.features_extractor = features_extractor
+        
+        self.optimizer_class = optimizer_class
+        self.optimizer_kwargs = optimizer_kwargs
+
+        self.features_extractor_class = features_extractor_class
+        self.features_extractor_kwargs = features_extractor_kwargs
+
+    def _update_features_extractor(
+        self,
+        net_kwargs: Dict[str, Any],
+        features_extractor: Optional[Transformer] = None,
+    ) -> Dict[str, Any]:
+        """
+        Update the network keyword arguments and create a new features extractor object if needed.
+        If a ``features_extractor`` object is passed, then it will be shared.
+
+        :param net_kwargs: the base network keyword arguments, without the ones
+            related to features extractor
+        :param features_extractor: a features extractor object.
+            If None, a new object will be created.
+        :return: The updated keyword arguments
+        """
+        net_kwargs = net_kwargs.copy()
+        if features_extractor is None:
+            # The features extractor is not shared, create a new one
+            features_extractor = self.make_features_extractor()
+        net_kwargs.update(dict(features_extractor=features_extractor, features_dim=features_extractor.features_dim))
+        return net_kwargs
+
+    def make_features_extractor(self) -> Transformer:
+        """Helper method to create a features extractor."""
+        return self.features_extractor_class(self.features_extractor_kwargs) # type: ignore
+
+    def extract_features(self, obs: PyTorchObs, features_extractor: Transformer) -> th.Tensor:
+        """
+        Preprocess the observation if needed and extract features.
+
+        :param obs: Observation
+        :param features_extractor: The features extractor to use.
+        :return: The extracted features
+        """
+        return features_extractor(obs)
+
+    def _get_constructor_parameters(self) -> Dict[str, Any]:
+        """
+        Get data that need to be saved in order to re-create the model when loading it from disk.
+
+        :return: The dictionary to pass to the as kwargs constructor when reconstruction this model.
+        """
+        return self.features_extractor_kwargs
+
+    @property
+    def device(self) -> th.device:
+        """Infer which device this policy lives on by inspecting its parameters.
+        If it has no parameters, the 'cpu' device is used as a fallback.
+
+        :return:"""
+        for param in self.parameters():
+            return param.device
+        return get_device("cpu")
+
+    def save(self, path: str) -> None:
+        """
+        Save model to a given location.
+
+        :param path:
+        """
+        th.save({"state_dict": self.state_dict(), "arguments": self._get_constructor_parameters()}, path)
+
+    @classmethod
+    def load(cls: Type[SelfBaseTransformerModel], path: str, device: Union[th.device, str] = "auto") -> SelfBaseTransformerModel:
+        """
+        Load model from path.
+
+        :param path:
+        :param device: Device on which the policy should be loaded.
+        :return:
+        """
+        device = get_device(device)
+        # Note(antonin): we cannot use `weights_only=True` here because we need to allow
+        # gymnasium imports for the policy to be loaded successfully
+        saved_variables = th.load(path, map_location=device, weights_only=False)
+
+        # Create policy object
+        model = cls(**saved_variables["arguments"])
+        # Load weights
+        model.load_state_dict(saved_variables["state_dict"])
+        model.to(device)
+        return model
+
+    def load_from_vector(self, vector: np.ndarray) -> None:
+        """
+        Load parameters from a 1D vector.
+
+        :param vector:
+        """
+        th.nn.utils.vector_to_parameters(th.as_tensor(vector, dtype=th.float, device=self.device), self.parameters())
+
+    def parameters_to_vector(self) -> np.ndarray:
+        """
+        Convert the parameters to a 1D vector.
+
+        :return:
+        """
+        return th.nn.utils.parameters_to_vector(self.parameters()).detach().cpu().numpy()
+
+    def set_training_mode(self, mode: bool) -> None:
+        """
+        Put the policy in either training or evaluation mode.
+
+        This affects certain modules, such as batch normalisation and dropout.
+
+        :param mode: if true, set to training mode, else set to evaluation mode
+        """
+        self.train(mode)
+
+    def is_vectorized_observation(self, observation: th.Tensor) -> bool:
+        """
+        Check whether or not the observation is vectorized,
+        apply transposition to image (so that they are channel-first) if needed.
+        This is used in DQN when sampling random action (epsilon-greedy policy)
+
+        :param observation: the input observation to check
+        :return: whether the given observation is vectorized or not
+        """
+        vectorized_env = False
+        vectorized_env = is_vectorized_observation(observation, self.observation_space)
+        return vectorized_env
+
+    def obs_to_tensor(self, observation: th.Tensor) -> Tuple[PyTorchObs, bool]:
+        """
+        Convert an input observation to a PyTorch tensor that can be fed to a model.
+        Includes sugar-coating to handle different observations (e.g. normalizing images).
+
+        :param observation: the input observation
+        :return: The observation as PyTorch tensor
+            and whether the observation is vectorized or not
+        """
+        vectorized_env = False
+        
+        obs_tensor = obs_as_tensor(observation, self.device)
+        return obs_tensor, vectorized_env
+    
 
 class BasePolicy(BaseModel, ABC):
     """The base policy object.
