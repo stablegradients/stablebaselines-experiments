@@ -439,18 +439,20 @@ class PositionalEncoding(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(self, embed_size, heads, ff_hidden, num_layers, vocab_size, max_len=100, dropout=0.5):
+    def __init__(self, input_size, embed_size, heads, ff_hidden, num_layers, vocab_size, max_len=100, dropout=0.5, mask=None):
         super(Transformer, self).__init__()
         self.word_embedding = nn.Embedding(vocab_size, embed_size)
         self.position = PositionalEncoding(embed_size, max_len)
+        self.fc_project = nn.Linear(input_size, embed_size)
         self.layers = nn.ModuleList(
             [TransformerBlock(embed_size, heads, ff_hidden, dropout) for _ in range(num_layers)]
         )
         self.fc_out = nn.Linear(embed_size, vocab_size)
         self.dropout = nn.Dropout(dropout)
+        self.mask = mask
 
-    def forward(self, x, mask):
+    def forward(self, x):
+        x = self.fc_project(x)
         for layer in self.layers:
-            out = layer(x, x, x, mask)
-        out = self.fc_out(out)
-        return out
+            out = layer(x, x, x, self.mask)
+        return out[:, -1, :]

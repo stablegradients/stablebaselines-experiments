@@ -1,6 +1,7 @@
 import time
 import os
 import torch
+import numpy as np
 import gymnasium as gym
 import argparse
 from typing import Any, Dict
@@ -183,7 +184,10 @@ def make_val_env_(env_config):
 if __name__ == '__main__':
     # Command-line argument parser
     parser = argparse.ArgumentParser(prog='tde_examples', description='Execute benchmarks for TDE')
-    parser.add_argument("--config_file", type=str, default="env_configs/multi_agent/sac_training.yml")  
+    parser.add_argument("--config_file", type=str, default="env_configs/multi_agent/a2c_training.yml")  
+    # parser args for number of iterations
+    parser.add_argument("--iterations", type=int, default=1000000)
+
     args = parser.parse_args()
 
     # Load RL training configuration
@@ -216,16 +220,24 @@ if __name__ == '__main__':
     # Run training loop
     vec_env = model.get_env()
     obs = vec_env.reset()
+    # maintain a running average of past n rewards
+    # to check if the model is learning
+    reward_list = []
 
     # Example loop for obtaining relative positions and actions during training
-    for i in range(1000):
+    for i in range(args.iterations):
         relative_positions = vec_env.envs[0].simulator.get_all_agents_relative(exclude_self=True)
-        if len(relative_positions.shape) == 2:
-            relative_positions = relative_positions.unsqueeze(0)
-        if len(relative_positions.shape) == 4:
-            relative_positions = relative_positions.squeeze(0)
 
-        # Predict the action and take a step in the environment
-        action, _state = model.predict(relative_positions.cuda(), deterministic=True)
-        action = action.squeeze(0)
+        # get it into the shape to feed the transformer
+        relative_positions = relative_positions.squeeze(0)
+
+        action, _state = model.predict(relative_positions, deterministic=True)
         obs, reward, done, info = vec_env.step(action)
+        reward_list.append(reward)
+        if i% 1000 == 0:
+            if len(reward_list) > 1000:
+                print(f"Mean reward over last 1000 steps: {np.mean(reward_list[-1000:])}")
+                reward_list = reward_list[-100:]
+            else:
+                print(f"Mean reward over last {len(reward_list)} steps: {np.mean(reward_list)}")
+        
