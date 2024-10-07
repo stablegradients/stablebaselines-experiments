@@ -1370,6 +1370,8 @@ class ActorCriticTransformerPolicy(BasePolicyTransformer):
             if optimizer_class == th.optim.Adam:
                 optimizer_kwargs["eps"] = 1e-5
                 optimizer_kwargs["betas"] = (0.9, 0.98)
+                optimizer_kwargs["weight_decay"] = 0.01
+                optimizer_kwargs["lr"] = 1e-4
 
         super().__init__(
             observation_space,
@@ -1405,13 +1407,13 @@ class ActorCriticTransformerPolicy(BasePolicyTransformer):
             # we can change it to consistent ones later
             features_extractor_kwargs = {}
             features_extractor_kwargs = {   "input_size": 6,
-                                            "embed_size": 128,
-                                            "heads": 2,
-                                            "ff_hidden": 128,
-                                            "num_layers": 4,
-                                            "vocab_size": 128,
+                                            "embed_size": 32,
+                                            "heads": 1,
+                                            "ff_hidden": 32,
+                                            "num_layers": 2,
+                                            "vocab_size": 32,
                                             "max_len": 100,
-                                            "dropout": 0.5,
+                                            "dropout": 0.1,
                                             "mask": None
                                         }
         
@@ -1644,6 +1646,7 @@ class ActorCriticTransformerPolicy(BasePolicyTransformer):
             and entropy of the action distribution.
         """
         # Preprocess the observation if needed
+        # obs = obs.reshape(1, obs.shape[0], obs.shape[1])
         features = self.extract_features(obs)
         if self.share_features_extractor:
             latent_pi, latent_vf = self.mlp_extractor(features)

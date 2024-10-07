@@ -163,7 +163,7 @@ def make_env_(env_config):
     --------
     env: The created gym environment.
     """
-    env = gym.make('torchdriveenv-v0', args={'cfg': env_config, 'data': training_data})
+    env = gym.make('Acrobot-v1')
     return env
 
 def make_val_env_(env_config):
@@ -178,7 +178,7 @@ def make_val_env_(env_config):
     --------
     env: The created gym environment.
     """
-    env = gym.make('torchdriveenv-v0', args={'cfg': env_config, 'data': validation_data})
+    env = gym.make('Acrobot-v1')
     return env
 
 if __name__ == '__main__':
@@ -223,21 +223,21 @@ if __name__ == '__main__':
     # maintain a running average of past n rewards
     # to check if the model is learning
     reward_list = []
+    model.learn(total_timesteps=args.iterations)
+    # # Example loop for obtaining relative positions and actions during training
+    # for i in range(args.iterations):
+    #     relative_positions = vec_env.envs[0].simulator.get_all_agents_relative(exclude_self=True)
 
-    # Example loop for obtaining relative positions and actions during training
-    for i in range(args.iterations):
-        relative_positions = vec_env.envs[0].simulator.get_all_agents_relative(exclude_self=True)
+    #     # get it into the shape to feed the transformer
+    #     relative_positions = relative_positions.squeeze(0)
 
-        # get it into the shape to feed the transformer
-        relative_positions = relative_positions.squeeze(0)
-
-        action, _state = model.predict(relative_positions, deterministic=True)
-        obs, reward, done, info = vec_env.step(action)
-        reward_list.append(reward)
-        if i% 1000 == 0:
-            if len(reward_list) > 1000:
-                print(f"Mean reward over last 1000 steps: {np.mean(reward_list[-1000:])}")
-                reward_list = reward_list[-100:]
-            else:
-                print(f"Mean reward over last {len(reward_list)} steps: {np.mean(reward_list)}")
+    #     action, _state = model.predict(relative_positions, deterministic=True)
+    #     obs, reward, done, info = vec_env.step(action)
+    #     reward_list.append(reward)
+    #     if i% 1000 == 0:
+    #         if len(reward_list) > 1000:
+    #             print(f"Mean reward over last 1000 steps: {np.mean(reward_list[-1000:])}")
+    #             reward_list = reward_list[-100:]
+    #         else:
+    #             print(f"Mean reward over last {len(reward_list)} steps: {np.mean(reward_list)}")
         

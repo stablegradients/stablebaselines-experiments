@@ -147,7 +147,6 @@ class A2C(OnPolicyAlgorithm):
             if isinstance(self.action_space, spaces.Discrete):
                 # Convert discrete action from float to long
                 actions = actions.long().flatten()
-
             values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, actions)
             values = values.flatten()
 

@@ -452,7 +452,19 @@ class Transformer(nn.Module):
         self.mask = mask
 
     def forward(self, x):
+        # if len(x.shape) == 2:
+        #     x = x.reshape(1, x.shape[0], x.shape[1])
+        # if len(x.shape) == 1:
+        #     x = x.reshape(1, 1, x.shape[0])
+        # print(x.shape)
+        # print("====")
+        # print("input shape", x.shape)
+        x = x.reshape(-1, 1, x.shape[-1])
+        # print(x.shape)
         x = self.fc_project(x)
         for layer in self.layers:
             out = layer(x, x, x, self.mask)
-        return out[:, -1, :]
+        # print("output shape", out.shape)
+        # print("====")
+        
+        return out[:, 0, :]
